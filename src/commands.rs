@@ -628,7 +628,7 @@ fn jobs_list(jobs: &mut JobTable) -> CmdOutput {
     }
 
     jobs.jobs
-        .retain(|job| !matches!(job.status, JobStatus::Done));
+        .retain(|job| !matches!(job.status, JobStatus::Done(_)));
 
     CmdOutput {
         stdout,

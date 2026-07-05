@@ -2,7 +2,7 @@ use std::process::Child;
 
 pub enum JobStatus {
     Running,
-    Done,
+    Done(i32),
 }
 
 pub struct Job {
@@ -24,8 +24,15 @@ impl Job {
         let marker = format!("[{}]{}", self.id, symbol);
 
         let (status_str, suffix) = match self.status {
-            JobStatus::Running => ("Running", " &"),
-            JobStatus::Done => ("Done", ""),
+            JobStatus::Running => ("Running".to_string(), " &".to_string()),
+            JobStatus::Done(code) => {
+                let label = if code == 0 {
+                    "Done".to_string()
+                } else {
+                    format!("Exit({code})")
+                };
+                (label, String::new())
+            }
         };
         format!("{:<6}{:<24}{}{}", marker, status_str, self.full_cmd, suffix)
     }
@@ -68,9 +75,9 @@ impl JobTable {
     pub fn update_statuses(&mut self) {
         for job in &mut self.jobs {
             if let JobStatus::Running = job.status
-                && let Ok(Some(_)) = job.child.try_wait()
+                && let Ok(Some(status)) = job.child.try_wait()
             {
-                job.status = JobStatus::Done;
+                job.status = JobStatus::Done(status.code().unwrap_or(0));
             }
         }
     }
@@ -78,7 +85,7 @@ impl JobTable {
     pub fn print_notifications(&mut self) {
         let len = self.jobs.len();
         for (i, job) in self.jobs.iter_mut().enumerate() {
-            if let JobStatus::Done = job.status
+            if let JobStatus::Done(_) = job.status
                 && !job.notified
             {
                 let symbol = if i + 1 == len {
@@ -98,7 +105,7 @@ impl JobTable {
         self.update_statuses();
         self.print_notifications();
         self.jobs
-            .retain(|job| !matches!(job.status, JobStatus::Done));
+            .retain(|job| !matches!(job.status, JobStatus::Done(_)));
     }
 }
 
@@ -191,7 +198,7 @@ mod tests {
             pid: child.id(),
             full_cmd: "finished_job".to_string(),
             child,
-            status: JobStatus::Done,
+            status: JobStatus::Done(0),
             notified: false,
         };
         let line = job.format_line(' ');
@@ -209,7 +216,7 @@ mod tests {
             pid: child.id(),
             full_cmd: "done_cmd".to_string(),
             child,
-            status: JobStatus::Done,
+            status: JobStatus::Done(0),
             notified: false,
         };
         let line = job.format_line('+');
@@ -307,7 +314,7 @@ mod tests {
         // Give the child a moment to exit before calling try_wait
         std::thread::sleep(Duration::from_millis(50));
         table.update_statuses();
-        assert!(matches!(table.jobs[0].status, JobStatus::Done));
+        assert!(matches!(table.jobs[0].status, JobStatus::Done(_)));
     }
 
     #[test]
