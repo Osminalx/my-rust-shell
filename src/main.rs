@@ -5,9 +5,10 @@ mod jobs;
 use rustyline::{CompletionType, Config, Editor, error::ReadlineError};
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 use crate::{commands::ShellState, completer::ShellHelper};
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let config = Config::builder()
         .completion_type(CompletionType::List)
         .build();
@@ -28,7 +29,7 @@ fn main() {
 
     let helper = ShellHelper::new(Arc::clone(&shell_state));
 
-    let mut rl = Editor::with_config(config).expect("Failed to create editor");
+    let mut rl = Editor::with_config(config).context("Failed to create editor")?;
     rl.set_helper(Some(helper));
 
     loop {
@@ -50,7 +51,9 @@ fn main() {
                 }
 
                 let variables = {
-                    let state = shell_state.lock().expect("shell: failed to lock state");
+                    let state = shell_state
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("shell: failed to lock state"))?;
                     state.variables.clone()
                 };
                 let mut pipeline = args::parse_pipeline(command, &variables);
@@ -68,4 +71,6 @@ fn main() {
             }
         }
     }
+
+    Ok(())
 }

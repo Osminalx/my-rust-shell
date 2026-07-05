@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 use std::env::{self, current_dir, var};
 use std::fs::{File, OpenOptions};
@@ -109,9 +110,11 @@ impl BuiltinCommand {
                 let cmd = match args {
                     [flag, name] if flag == "-p" => DeclareCmd::Print(name.clone()),
                     [assignment] if assignment.contains('=') => {
-                        //TODO: change the unwrap for a better way of handling this:
-                        let (name, value) = assignment.split_once('=').unwrap();
-                        DeclareCmd::Assign(name.to_string(), value.to_string())
+                        if let Some((name, value)) = assignment.split_once('=') {
+                            DeclareCmd::Assign(name.to_string(), value.to_string())
+                        } else {
+                            DeclareCmd::Print(String::new())
+                        }
                     }
                     _ => DeclareCmd::Print(String::new()),
                 };
@@ -139,7 +142,7 @@ impl BuiltinCommand {
             }
             BuiltinCommand::Cd(path) => {
                 if let Err(err) = cd(path) {
-                    Self::write_stderr(&err, &stderr_redirect);
+                    Self::write_stderr(&format!("{err}\n"), &stderr_redirect);
                 }
             }
             BuiltinCommand::Echo(args) => {
@@ -406,7 +409,11 @@ pub fn execute_pipeline(pipeline: &mut crate::args::Pipeline, state: Arc<Mutex<S
         match child {
             Ok(mut c) => {
                 if !is_last {
-                    prev_stdout = Some(c.stdout.take().unwrap().into());
+                    if let Some(stdout) = c.stdout.take() {
+                        prev_stdout = Some(stdout.into());
+                    } else {
+                        eprintln!("shell: pipe stdout missing, skipping");
+                    }
                 }
                 children.push(PipelineChild::Process(c));
             }
@@ -475,25 +482,18 @@ pub fn type_cmd(arg: String) -> CmdOutput {
     }
 }
 
-pub fn cd(path: Option<String>) -> Result<(), String> {
+pub fn cd(path: Option<String>) -> anyhow::Result<()> {
     let target = match path.as_deref() {
         None | Some("~") => {
-            let Some(home) = env::home_dir() else {
-                return Err("cd: Couldn't determinate the home directory\n".to_string());
-            };
-            home
+            env::home_dir().context("cd: Couldn't determine the home directory")?
         }
         Some(p) => PathBuf::from(p),
     };
 
-    if env::set_current_dir(&target).is_err() {
-        Err(format!(
-            "cd: {}: No such file or directory\n",
-            target.display()
-        ))
-    } else {
-        Ok(())
-    }
+    env::set_current_dir(&target)
+        .with_context(|| format!("cd: {}: No such file or directory", target.display()))?;
+
+    Ok(())
 }
 
 pub fn complete(args: &[String], completions: &mut HashMap<String, String>) -> CmdOutput {
@@ -757,7 +757,7 @@ mod tests {
         let original = env::current_dir().unwrap();
         let result = cd(Some("/nonexistent_path_that_does_not_exist_42".to_string()));
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No such file or directory"));
+        assert!(result.unwrap_err().to_string().contains("No such file or directory"));
         assert_eq!(env::current_dir().unwrap(), original, "CWD should not change after failed cd");
     }
 
