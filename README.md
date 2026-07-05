@@ -1,35 +1,132 @@
-[![progress-banner](https://backend.codecrafters.io/progress/shell/2f95a711-4b07-4261-9bd9-26afe1963a12)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# my-rust-shell
 
-This is a starting point for Rust solutions to the
-["Build Your Own Shell" Challenge](https://app.codecrafters.io/courses/shell/overview).
+A POSIX-compliant shell written in Rust — built from scratch as a learning project to understand shell internals: parsing, job control, pipelines, redirections, and terminal interaction.
 
-In this challenge, you'll build your own POSIX compliant shell that's capable of
-interpreting shell commands, running external programs and builtin commands like
-cd, pwd, echo and more. Along the way, you'll learn about shell command parsing,
-REPLs, builtin commands, and more.
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+| Feature | Description |
+|---------|-------------|
+| **Builtins** | `cd`, `echo`, `exit`, `pwd`, `type`, `history`, `declare`, `jobs`, `complete` |
+| **Pipelines** | Chain commands with `\|` |
+| **Redirections** | `>` (overwrite), `>>` (append), `2>` (stderr redirect) |
+| **Job control** | Background processes with `&`, list jobs with `jobs` |
+| **Variable expansion** | `$var` and `${var}` syntax |
+| **Quoting** | Single quotes (literal), double quotes (expand `$`), escape sequences with `\` |
+| **Tab completion** | Commands (builtins + PATH), filenames, custom completers via `complete -C` |
+| **History** | Persistent history via `HISTFILE` env var, `history` builtin with read/write/append |
+| **REPL** | Interactive prompt with rustyline (readline-like editing) |
 
-# Passing the first stage
-
-The entry point for your `shell` implementation is in `src/main.rs`. Study and
-uncomment the relevant code, then run the command below to execute the tests on
-our servers:
+## Quick start
 
 ```sh
-codecrafters submit
+# Build and run
+cargo run
+
+# Or build first, then run
+cargo build --release
+./target/release/my-rust-shell
 ```
 
-Time to move on to the next stage!
+Once inside the shell:
 
-# Stage 2 & beyond
+```sh
+$ echo "hello world"
+hello world
+$ ls -la | head -3
+$ pwd
+/home/user/projects
+$ history
+    1  echo "hello world"
+    2  ls -la | head -3
+```
 
-Note: This section is for stages 2 and beyond.
+## Usage
 
-1. Ensure you have `cargo (1.95)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Run `codecrafters submit` to submit your solution to CodeCrafters. Test
-   output will be streamed to your terminal.
+### Navigation
+
+```sh
+cd /path/to/dir     # change directory
+cd ~                # go home
+cd                  # same as cd ~
+pwd                 # print working directory
+```
+
+### Redirections
+
+```sh
+echo "log entry" >> file.log     # append to file
+echo "new file" > output.txt     # overwrite file
+cat missing.txt 2> errors.log    # redirect stderr
+```
+
+### Pipelines
+
+```sh
+cat large.log | grep error | head -10
+ls -la | sort -k5 -n | tail -3
+```
+
+### Background jobs
+
+```sh
+sleep 30 &
+[1] 12345
+jobs
+[1]  Running    sleep 30 &
+```
+
+### Variables
+
+```sh
+declare name="world"
+echo hello $name                  # → hello world
+echo "hello $name"                # → hello world (double-quoted expands)
+echo 'hello $name'                # → hello $name (single-quoted literal)
+echo pre${name}post               # → preworldpost (brace syntax)
+```
+
+### Tab completion
+
+- Type a command prefix and press **Tab** to autocomplete builtins or executables in PATH.
+- After a command, Tab completes filenames.
+- Register custom completers: `complete -C /path/to/completer command_name`
+
+### History
+
+By default, sessions are ephemeral. To persist history across sessions:
+
+```sh
+export HISTFILE=~/.my_shell_history
+```
+
+Then use the `history` builtin:
+
+```sh
+history              # show all entries
+history 10           # show last 10 entries
+history -r file      # read history from file
+history -w file      # write history to file
+history -a file      # append new entries to file
+```
+
+## Project structure
+
+```
+src/
+├── main.rs         # REPL loop, line input, history load
+├── args.rs         # Tokenizer, parser, variable expansion
+├── commands.rs     # Builtin commands, pipeline execution, PATH lookup
+├── completer.rs    # Tab completion (commands, files, custom)
+└── jobs.rs         # Background job table and status tracking
+```
+
+## Development
+
+```sh
+cargo test          # run unit tests
+cargo test -- --nocapture  # show test output
+```
+
+## License
+
+MIT

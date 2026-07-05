@@ -522,11 +522,10 @@ mod tests {
     }
 
     #[test]
-    fn test_var_embedded_in_word() {
+    fn test_var_brace_expansion() {
         let vars = vars_map();
         let result = parse_args("echo pre${var}post", &vars);
-        // ${...} not supported yet, so literal
-        assert_eq!(result.args, vec!["echo", "pre${var}post"]);
+        assert_eq!(result.args, vec!["echo", "prehellopost"]);
     }
 
     #[test]
@@ -544,10 +543,11 @@ mod tests {
     }
 
     #[test]
-    fn test_var_undefined_expands_to_empty() {
+    fn test_undefined_var_removes_word() {
         let vars = HashMap::new();
         let result = parse_args("echo $undefined", &vars);
-        assert_eq!(result.args, vec!["echo", ""]);
+        // POSIX: unset variable expands to nothing, word is removed
+        assert_eq!(result.args, vec!["echo"]);
     }
 
     #[test]

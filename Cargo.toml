@@ -1,12 +1,15 @@
 [package]
-name = "codecrafters-shell"
+name = "my-rust-shell"
 version = "0.1.0"
-authors = ["Codecrafters <hello@codecrafters.io>"]
+authors = ["Osminalx"]
+description = "A POSIX-compliant shell written in Rust with job control, pipes, redirects, variable expansion, and tab completion"
+repository = "https://github.com/Osminalx/my-rust-shell"
+license = "MIT"
 edition = "2024"
 rust-version = "1.95"
 
 [dependencies]
-anyhow = "1.0.68"                                # error handling
-bytes = "1.3.0"                                  # helps manage buffers
+anyhow = "1.0.68"
+bytes = "1.3.0"
 rustyline = "18.0.0"
-thiserror = "1.0.38"                             # error handling
+thiserror = "1.0.38"

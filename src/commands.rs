@@ -628,7 +628,7 @@ fn jobs_list(jobs: &mut JobTable) -> CmdOutput {
     }
 
     jobs.jobs
-        .retain(|job| !matches!(job.status, JobStatus::Done(_)));
+        .retain(|job| !matches!(job.status, JobStatus::Done));
 
     CmdOutput {
         stdout,
@@ -700,4 +700,414 @@ pub fn get_path_cmd(arg: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::collections::HashMap;
+
+    // ── echo tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_echo_no_args() {
+        let result = echo(&[]);
+        assert_eq!(result.stdout, "\n");
+        assert_eq!(result.stderr, "");
+    }
+
+    #[test]
+    fn test_echo_one_arg() {
+        let result = echo(&["hello".to_string()]);
+        assert_eq!(result.stdout, "hello\n");
+    }
+
+    #[test]
+    fn test_echo_multiple_args() {
+        let result = echo(&["hello".to_string(), "world".to_string()]);
+        assert_eq!(result.stdout, "hello world\n");
+    }
+
+    // ── type_cmd tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_type_builtin() {
+        let result = type_cmd("echo".to_string());
+        assert_eq!(result.stdout, "echo is a shell builtin\n");
+    }
+
+    #[test]
+    fn test_type_external() {
+        let result = type_cmd("sh".to_string());
+        assert!(result.stdout.starts_with("sh is "), "Expected 'sh is <path>', got: {:?}", result.stdout);
+    }
+
+    #[test]
+    fn test_type_not_found() {
+        let result = type_cmd("nonexistentcommand123xyz".to_string());
+        assert_eq!(result.stdout, "nonexistentcommand123xyz: not found\n");
+    }
+
+    // ── cd tests (combined into one to avoid CWD races) ──────────
+
+    #[test]
+    fn test_cd_invalid_path() {
+        // Does NOT change CWD — safe to run in parallel
+        let original = env::current_dir().unwrap();
+        let result = cd(Some("/nonexistent_path_that_does_not_exist_42".to_string()));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No such file or directory"));
+        assert_eq!(env::current_dir().unwrap(), original, "CWD should not change after failed cd");
+    }
+
+    #[test]
+    fn test_cd_variants() {
+        // ALL CWD-changing cd variants + pwd in ONE test to avoid parallel races
+        let original = env::current_dir().unwrap();
+
+        // pwd returns current directory
+        let result = pwd();
+        assert_eq!(result.stdout, format!("{}\n", original.display()));
+
+        // cd to a valid path (temp dir)
+        let tmp = env::temp_dir();
+        cd(Some(tmp.to_string_lossy().to_string())).unwrap();
+        assert_eq!(env::current_dir().unwrap(), tmp, "cd to temp dir");
+
+        // cd without args goes to $HOME
+        let home = env::home_dir().expect("HOME must be set for this test");
+        cd(None).unwrap();
+        assert_eq!(env::current_dir().unwrap(), home, "cd without args should go to $HOME");
+
+        // cd ~ also goes to $HOME
+        cd(Some("~".to_string())).unwrap();
+        assert_eq!(env::current_dir().unwrap(), home, "cd ~ should go to $HOME");
+
+        // Restore original CWD
+        env::set_current_dir(&original).unwrap();
+    }
+
+    // ── is_valid_identifier tests ────────────────────────────────
+
+    #[test]
+    fn test_is_valid_identifier_valid() {
+        assert!(is_valid_identifier("foo"), "basic name");
+        assert!(is_valid_identifier("_bar"), "underscore prefix");
+        assert!(is_valid_identifier("var123"), "mixed alphanumeric");
+        assert!(is_valid_identifier("_"), "just underscore");
+    }
+
+    #[test]
+    fn test_is_valid_identifier_invalid() {
+        assert!(!is_valid_identifier("123abc"), "starts with digit");
+        assert!(!is_valid_identifier("foo bar"), "contains space");
+        assert!(!is_valid_identifier(""), "empty string");
+        assert!(!is_valid_identifier("-a"), "starts with dash");
+        assert!(!is_valid_identifier("a%b"), "special char");
+    }
+
+    // ── BuiltinCommand::from_name tests ──────────────────────────
+
+    #[test]
+    fn test_from_name_exit() {
+        assert!(matches!(BuiltinCommand::from_name("exit", &[]), BuiltinCommand::Exit));
+    }
+
+    #[test]
+    fn test_from_name_echo() {
+        let cmd = BuiltinCommand::from_name("echo", &["hello".to_string(), "world".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Echo(ref args) if args == &["hello".to_string(), "world".to_string()]));
+    }
+
+    #[test]
+    fn test_from_name_type() {
+        let cmd = BuiltinCommand::from_name("type", &["echo".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Type(ref arg) if arg == "echo"));
+    }
+
+    #[test]
+    fn test_from_name_pwd() {
+        assert!(matches!(BuiltinCommand::from_name("pwd", &[]), BuiltinCommand::Pwd));
+    }
+
+    #[test]
+    fn test_from_name_cd() {
+        let cmd = BuiltinCommand::from_name("cd", &["/tmp".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Cd(Some(ref p)) if p == "/tmp"));
+
+        let cmd = BuiltinCommand::from_name("cd", &[]);
+        assert!(matches!(cmd, BuiltinCommand::Cd(None)));
+    }
+
+    #[test]
+    fn test_from_name_complete() {
+        let cmd = BuiltinCommand::from_name("complete", &["-C".to_string(), "comp".to_string(), "mycmd".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Complete(ref args) if args == &["-C".to_string(), "comp".to_string(), "mycmd".to_string()]));
+    }
+
+    #[test]
+    fn test_from_name_history_show() {
+        let cmd = BuiltinCommand::from_name("history", &[]);
+        assert!(matches!(cmd, BuiltinCommand::History(HistoryCmd::Show(None))));
+    }
+
+    #[test]
+    fn test_from_name_history_show_n() {
+        let cmd = BuiltinCommand::from_name("history", &["5".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::History(HistoryCmd::Show(Some(5)))));
+    }
+
+    #[test]
+    fn test_from_name_history_read() {
+        let cmd = BuiltinCommand::from_name("history", &["-r".to_string(), "/tmp/hist".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::History(HistoryCmd::Read(ref p)) if p == "/tmp/hist"));
+    }
+
+    #[test]
+    fn test_from_name_history_write() {
+        let cmd = BuiltinCommand::from_name("history", &["-w".to_string(), "/tmp/hist".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::History(HistoryCmd::Write(ref p)) if p == "/tmp/hist"));
+    }
+
+    #[test]
+    fn test_from_name_history_append() {
+        let cmd = BuiltinCommand::from_name("history", &["-a".to_string(), "/tmp/hist".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::History(HistoryCmd::Append(ref p)) if p == "/tmp/hist"));
+    }
+
+    #[test]
+    fn test_from_name_declare_print() {
+        let cmd = BuiltinCommand::from_name("declare", &["-p".to_string(), "myvar".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Declare(DeclareCmd::Print(ref n)) if n == "myvar"));
+    }
+
+    #[test]
+    fn test_from_name_declare_assign() {
+        let cmd = BuiltinCommand::from_name("declare", &["myvar=hello".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Declare(DeclareCmd::Assign(ref n, ref v)) if n == "myvar" && v == "hello"));
+    }
+
+    #[test]
+    fn test_from_name_jobs() {
+        assert!(matches!(BuiltinCommand::from_name("jobs", &[]), BuiltinCommand::Jobs));
+    }
+
+    #[test]
+    fn test_from_name_unknown() {
+        let cmd = BuiltinCommand::from_name("foobar", &["arg1".to_string()]);
+        assert!(matches!(cmd, BuiltinCommand::Unknown(ref name, ref args)
+            if name == "foobar" && args == &["arg1".to_string()]));
+    }
+
+    #[test]
+    fn test_from_name_empty_cmd_is_unknown() {
+        // from_name with "" returns Unknown since it doesn't match any arm
+        let cmd = BuiltinCommand::from_name("", &[]);
+        assert!(matches!(cmd, BuiltinCommand::Unknown(ref name, _) if name == ""));
+    }
+
+    // ── BuiltinCommand::is_builtin tests ─────────────────────────
+
+    #[test]
+    fn test_is_builtin_all() {
+        for name in BUILTINS {
+            assert!(BuiltinCommand::is_builtin(name), "{name} should be recognized as builtin");
+        }
+    }
+
+    #[test]
+    fn test_is_builtin_not() {
+        assert!(!BuiltinCommand::is_builtin("foobar"));
+        assert!(!BuiltinCommand::is_builtin("ls"));
+        assert!(!BuiltinCommand::is_builtin(""));
+    }
+
+    // ── get_path_cmd tests ───────────────────────────────────────
+
+    #[test]
+    fn test_get_path_cmd_exists() {
+        let result = get_path_cmd("sh");
+        assert!(result.is_some(), "sh should be found in PATH");
+        let path = result.unwrap();
+        assert!(path.is_file(), "path should be a file: {}", path.display());
+    }
+
+    #[test]
+    fn test_get_path_cmd_not_exists() {
+        let result = get_path_cmd("nonexistent_cmd_98765");
+        assert!(result.is_none());
+    }
+
+    // ── history tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_history_empty() {
+        let result = history(&[], None);
+        assert_eq!(result.stdout, "");
+    }
+
+    #[test]
+    fn test_history_no_limit() {
+        let cmds = vec!["first".to_string(), "second".to_string(), "third".to_string()];
+        let result = history(&cmds, None);
+        assert_eq!(result.stdout, "    1  first\n    2  second\n    3  third\n");
+    }
+
+    #[test]
+    fn test_history_with_limit() {
+        let cmds = vec!["first".to_string(), "second".to_string(), "third".to_string()];
+        let result = history(&cmds, Some(2));
+        assert_eq!(result.stdout, "    2  second\n    3  third\n");
+    }
+
+    #[test]
+    fn test_history_limit_larger_than_len() {
+        let cmds = vec!["first".to_string(), "second".to_string()];
+        let result = history(&cmds, Some(10));
+        assert_eq!(result.stdout, "    1  first\n    2  second\n");
+    }
+
+    #[test]
+    fn test_history_limit_zero() {
+        let cmds = vec!["first".to_string(), "second".to_string()];
+        let result = history(&cmds, Some(0));
+        assert_eq!(result.stdout, "", "limit 0 should show nothing");
+    }
+
+    // ── BUILTINS constant ────────────────────────────────────────
+
+    #[test]
+    fn test_builtins_constant() {
+        assert_eq!(BUILTINS, &["echo", "exit", "cd", "pwd", "type", "complete", "jobs", "history", "declare"]);
+    }
+
+    // ── declare tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_declare_assign_valid() {
+        let mut vars = HashMap::new();
+        let result = declare_assign("myvar".to_string(), "hello".to_string(), &mut vars);
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.stderr, "");
+        assert_eq!(vars.get("myvar").unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_declare_assign_invalid_identifier() {
+        let mut vars = HashMap::new();
+        let result = declare_assign("123abc".to_string(), "val".to_string(), &mut vars);
+        assert!(result.stderr.contains("not a valid identifier"));
+        assert!(vars.is_empty(), "no variable should be inserted");
+    }
+
+    #[test]
+    fn test_declare_print_existing() {
+        let mut vars = HashMap::new();
+        vars.insert("myvar".to_string(), "hello".to_string());
+        let result = declare_print("myvar", &vars);
+        assert_eq!(result.stdout, "declare -- myvar=\"hello\"\n");
+    }
+
+    #[test]
+    fn test_declare_print_not_found() {
+        let vars = HashMap::new();
+        let result = declare_print("nonexistent", &vars);
+        assert!(result.stderr.contains("not found"));
+    }
+
+    // ── complete tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_complete_register() {
+        let mut completions = HashMap::new();
+        let result = complete(&["-C".to_string(), "/usr/bin/comp".to_string(), "mycmd".to_string()], &mut completions);
+        assert_eq!(completions.get("mycmd").unwrap(), "/usr/bin/comp");
+        assert_eq!(result.stdout, "");
+    }
+
+    #[test]
+    fn test_complete_register_no_command() {
+        let mut completions = HashMap::new();
+        let result = complete(&["-C".to_string()], &mut completions);
+        assert!(result.stderr.contains("no command specified"));
+    }
+
+    #[test]
+    fn test_complete_print() {
+        let mut completions = HashMap::new();
+        completions.insert("mycmd".to_string(), "/usr/bin/comp".to_string());
+        let result = complete(&["-p".to_string(), "mycmd".to_string()], &mut completions);
+        assert_eq!(result.stdout, "complete -C '/usr/bin/comp' mycmd\n");
+    }
+
+    #[test]
+    fn test_complete_print_not_found() {
+        let mut completions = HashMap::new();
+        let result = complete(&["-p".to_string(), "nope".to_string()], &mut completions);
+        assert!(result.stderr.contains("no completion specification"));
+    }
+
+    #[test]
+    fn test_complete_print_no_command() {
+        let mut completions = HashMap::new();
+        let result = complete(&["-p".to_string()], &mut completions);
+        assert!(result.stderr.contains("no command specified"));
+    }
+
+    #[test]
+    fn test_complete_remove() {
+        let mut completions = HashMap::new();
+        completions.insert("mycmd".to_string(), "/usr/bin/comp".to_string());
+        let result = complete(&["-r".to_string(), "mycmd".to_string()], &mut completions);
+        assert!(!completions.contains_key("mycmd"));
+        assert_eq!(result.stdout, "");
+    }
+
+    #[test]
+    fn test_complete_remove_no_command() {
+        let mut completions = HashMap::new();
+        let result = complete(&["-r".to_string()], &mut completions);
+        assert!(result.stderr.contains("no command specified"));
+    }
+
+    #[test]
+    fn test_complete_usage_empty() {
+        let mut completions = HashMap::new();
+        let result = complete(&[], &mut completions);
+        assert!(result.stderr.contains("usage"));
+    }
+
+    #[test]
+    fn test_complete_unknown_flag() {
+        let mut completions = HashMap::new();
+        let result = complete(&["--badflag".to_string()], &mut completions);
+        assert!(result.stderr.contains("option not implemented"));
+    }
+
+    // ── BuiltinCommand::parse (via ParsedCommand) ────────────────
+
+    #[test]
+    fn test_parse_echo() {
+        let parsed = ParsedCommand {
+            args: vec!["echo".to_string(), "hello".to_string()],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            background: false,
+        };
+        let cmd = BuiltinCommand::parse(&parsed);
+        assert!(matches!(cmd, BuiltinCommand::Echo(ref args) if args == &["hello".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        let parsed = ParsedCommand {
+            args: vec![],
+            stdout_redirect: None,
+            stderr_redirect: None,
+            background: false,
+        };
+        let cmd = BuiltinCommand::parse(&parsed);
+        assert!(matches!(cmd, BuiltinCommand::Unknown(ref name, _) if name == ""));
+    }
 }

@@ -42,16 +42,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codecrafters-shell"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "rustyline",
- "thiserror",
-]
-
-[[package]]
 name = "endian-type"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -89,6 +79,16 @@ name = "memchr"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b947ae49db0d222b1dbc6b113ce7248a3fc3a6ca21b696717bfc000ba4484d8"
+
+[[package]]
+name = "my-rust-shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "rustyline",
+ "thiserror",
+]
 
 [[package]]
 name = "nibble_vec"
